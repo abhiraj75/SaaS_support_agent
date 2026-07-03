@@ -3,7 +3,14 @@ from google.genai import types
 
 from app.config import GEMINI_API_KEY, GEMINI_MODEL
 
-_client = genai.Client(api_key=GEMINI_API_KEY)
+_client = None
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        _client = genai.Client(api_key=GEMINI_API_KEY)
+    return _client
 
 
 def _build_contents(messages: list[dict]) -> list[types.Content]:
@@ -65,7 +72,7 @@ def generate(messages: list[dict], tool_declarations: list[dict], system_prompt:
     if tools:
         config.tools = tools
 
-    response = _client.models.generate_content(
+    response = _get_client().models.generate_content(
         model=GEMINI_MODEL,
         contents=contents,
         config=config,

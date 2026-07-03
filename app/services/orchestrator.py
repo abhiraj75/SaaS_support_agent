@@ -10,6 +10,7 @@ from app.services.conversation import ConversationService
 from app.tools.get_payment_status import GetPaymentStatus
 from app.tools.get_subscription import GetSubscription
 from app.tools.registry import ToolRegistry
+from app.tools.retry_payment import RetryPayment
 from app.tools.search_kb import SearchKnowledgeBase
 
 MAX_TOOL_ITERATIONS = 5
@@ -20,6 +21,7 @@ def _build_registry() -> ToolRegistry:
     registry.register(SearchKnowledgeBase())
     registry.register(GetSubscription())
     registry.register(GetPaymentStatus())
+    registry.register(RetryPayment())
     return registry
 
 
@@ -54,6 +56,13 @@ class Orchestrator:
         conversation_id: uuid.UUID | None = None,
     ) -> dict:
         conversation = self.conversation_service.load_or_create(customer_id, conversation_id)
+
+        # Snapshot before this turn — determines whether a pending_action
+        # is a carryover from a previous turn (eligible for confirmation)
+        # or doesn't exist yet (eligible for offer).
+        had_pending_action = conversation.pending_action is not None
+        gate_acted = False
+
         self.conversation_service.add_message(conversation.id, "user", message)
 
         history = self.conversation_service.get_history(conversation.id)
@@ -74,6 +83,11 @@ class Orchestrator:
                 )
                 for inv in pending_invocations:
                     inv.message_id = assistant_msg.id
+
+                # Expire stale pending_action from a prior turn if untouched
+                if had_pending_action and not gate_acted:
+                    conversation.pending_action = None
+
                 self.db.commit()
 
                 return {
@@ -87,6 +101,37 @@ class Orchestrator:
 
             tool_name = response["tool_name"]
             arguments = response["arguments"]
+
+            # Spend gate: retry_payment requires a confirmation turn.
+            # On first call (no prior pending_action), record the offer but don't dispatch.
+            # On a confirming turn (pending_action set in a prior turn), dispatch.
+            if tool_name == "retry_payment":
+                gate_acted = True
+                if (
+                    had_pending_action
+                    and conversation.pending_action
+                    and conversation.pending_action.get("tool_name") == "retry_payment"
+                ):
+                    conversation.pending_action = None
+                    # Fall through to normal dispatch
+                else:
+                    conversation.pending_action = {
+                        "tool_name": "retry_payment",
+                        "arguments": arguments,
+                    }
+                    result = {"status": "pending_confirmation"}
+                    inv = self.conversation_service.record_tool_invocation(
+                        conversation_id=conversation.id,
+                        message_id=None,
+                        tool_name=tool_name,
+                        arguments=arguments,
+                        result=result,
+                        status="ok",
+                    )
+                    pending_invocations.append(inv)
+                    messages.append({"role": "tool_call", "name": tool_name, "args": arguments})
+                    messages.append({"role": "tool_response", "name": tool_name, "result": result})
+                    continue
 
             try:
                 result = self.registry.dispatch(tool_name, arguments, customer_id, self.db)
