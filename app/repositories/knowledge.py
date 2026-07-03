@@ -1,3 +1,5 @@
+import uuid
+
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -23,3 +25,26 @@ class KnowledgeRepository:
             .limit(limit)
             .all()
         )
+
+    def list_all(self) -> list[KnowledgeArticle]:
+        return self.db.query(KnowledgeArticle).order_by(KnowledgeArticle.created_at).all()
+
+    def get(self, article_id: uuid.UUID) -> KnowledgeArticle | None:
+        return self.db.get(KnowledgeArticle, article_id)
+
+    def create(self, title: str, body: str, category: str) -> KnowledgeArticle:
+        article = KnowledgeArticle(title=title, body=body, category=category)
+        self.db.add(article)
+        self.db.flush()
+        return article
+
+    def update(self, article: KnowledgeArticle, **fields) -> KnowledgeArticle:
+        for key, value in fields.items():
+            setattr(article, key, value)
+        self.db.flush()
+        return article
+
+    def delete(self, article: KnowledgeArticle) -> None:
+        self.db.delete(article)
+        self.db.flush()
+

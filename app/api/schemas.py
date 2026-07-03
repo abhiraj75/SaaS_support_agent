@@ -48,3 +48,43 @@ class ConversationResponse(BaseModel):
     status: str
     created_at: datetime
     messages: list[MessageResponse]
+
+
+class FeedbackRequest(BaseModel):
+    message_id: uuid.UUID
+    rating: str
+    comment: str | None = None
+
+
+class FeedbackResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    message_id: uuid.UUID
+    rating: str
+    comment: str | None
+    created_at: datetime
+
+
+class ArticleCreateRequest(BaseModel):
+    title: str
+    body: str
+    category: str
+
+
+class ArticleUpdateRequest(BaseModel):
+    title: str | None = None
+    body: str | None = None
+    category: str | None = None
+
+
+class ArticleResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    title: str
+    body: str
+    category: str
+    created_at: datetime
+    updated_at: datetime
+
