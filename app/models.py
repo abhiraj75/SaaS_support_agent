@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Column, DateTime, ForeignKey, Numeric, String, Text, func
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, Sequence, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -37,7 +37,10 @@ class Conversation(Base):
     pending_action = Column(JSONB, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
-    messages = relationship("Message", back_populates="conversation", order_by="Message.created_at, Message.id")
+    messages = relationship("Message", back_populates="conversation", order_by="Message.sequence_num")
+
+
+message_seq = Sequence("message_sequence_num_seq")
 
 
 class Message(Base):
@@ -47,6 +50,7 @@ class Message(Base):
     conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=False)
     role = Column(String, nullable=False)
     content = Column(Text, nullable=False)
+    sequence_num = Column(Integer, message_seq, server_default=message_seq.next_value(), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
     conversation = relationship("Conversation", back_populates="messages")

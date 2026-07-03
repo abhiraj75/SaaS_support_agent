@@ -43,12 +43,15 @@ def upgrade():
         sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
     )
 
+    op.execute("CREATE SEQUENCE IF NOT EXISTS message_sequence_num_seq")
+
     op.create_table(
         "messages",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
         sa.Column("conversation_id", UUID(as_uuid=True), sa.ForeignKey("conversations.id"), nullable=False),
         sa.Column("role", sa.String, nullable=False),
         sa.Column("content", sa.Text, nullable=False),
+        sa.Column("sequence_num", sa.Integer, server_default=sa.text("nextval('message_sequence_num_seq')"), nullable=False),
         sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
     )
 

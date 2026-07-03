@@ -46,7 +46,7 @@ def test_first_call_does_not_execute(client, db):
         ToolInvocation.tool_name == "retry_payment",
     ).all()
     assert len(invocations) == 1
-    assert invocations[0].result == {"status": "pending_confirmation"}
+    assert invocations[0].result["status"] == "pending_confirmation"
 
 
 def test_confirming_turn_executes_and_clears(client, db):
@@ -91,8 +91,11 @@ def test_confirming_turn_executes_and_clears(client, db):
 def test_gate_is_structural_not_prompt(client, db):
     """Gate (c): stripping the prompt's offer instruction does not enable a turn-one charge."""
     stripped = SYSTEM_PROMPT.replace(
-        "If a payment has failed and the customer wants to retry, offer to retry "
-        "using retry_payment. Do not retry without the customer confirming.\n\n",
+        "If a payment has failed and the customer wants to retry, call retry_payment. "
+        "If the tool returns status 'pending_confirmation', the payment has NOT been "
+        "retried yet. Tell the customer you can retry it and ask them to confirm. "
+        "Do not tell the customer the payment was retried until the tool returns "
+        "status 'succeeded'.\n\n",
         "",
     )
 

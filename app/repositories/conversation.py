@@ -29,7 +29,7 @@ class ConversationRepository:
         return (
             self.db.query(Message)
             .filter(Message.conversation_id == conversation_id)
-            .order_by(Message.created_at.desc(), Message.id.desc())
+            .order_by(Message.sequence_num.desc())
             .limit(limit)
             .all()[::-1]
         )
