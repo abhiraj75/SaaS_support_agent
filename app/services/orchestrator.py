@@ -10,6 +10,7 @@ from app.services.conversation import ConversationService
 from app.tools.get_payment_status import GetPaymentStatus
 from app.tools.get_subscription import GetSubscription
 from app.tools.registry import ToolRegistry
+from app.tools.reset_password import ResetPassword
 from app.tools.retry_payment import RetryPayment
 from app.tools.search_kb import SearchKnowledgeBase
 
@@ -22,6 +23,7 @@ def _build_registry() -> ToolRegistry:
     registry.register(GetSubscription())
     registry.register(GetPaymentStatus())
     registry.register(RetryPayment())
+    registry.register(ResetPassword())
     return registry
 
 
