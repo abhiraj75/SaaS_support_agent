@@ -1,0 +1,13 @@
+PRD.md
+ROADMAP.md
+AGENTS.md
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+.venv/
+venv/
+dist/
+build/
+*.egg
