@@ -24,5 +24,7 @@ class ToolRegistry:
 
     def dispatch(self, tool_name: str, raw_args: dict, customer_id: uuid.UUID | None, db: Session) -> dict:
         tool = self._tools[tool_name]
+        if tool.requires_customer_id and customer_id is None:
+            raise ValueError(f"{tool_name} requires a session customer_id")
         validated = tool.arg_model(**raw_args)
         return tool.execute(validated, customer_id, db)

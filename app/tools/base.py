@@ -9,6 +9,7 @@ class Tool(ABC):
     name: str
     description: str
     arg_model: type[BaseModel]
+    requires_customer_id: bool = False
 
     @abstractmethod
     def execute(self, args: BaseModel, customer_id: uuid.UUID | None, db: Session) -> dict:

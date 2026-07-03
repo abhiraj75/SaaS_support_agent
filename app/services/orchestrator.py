@@ -7,6 +7,8 @@ from app.llm import adapter
 from app.llm.prompts import SYSTEM_PROMPT
 from app.models import ToolInvocation
 from app.services.conversation import ConversationService
+from app.tools.get_payment_status import GetPaymentStatus
+from app.tools.get_subscription import GetSubscription
 from app.tools.registry import ToolRegistry
 from app.tools.search_kb import SearchKnowledgeBase
 
@@ -16,6 +18,8 @@ MAX_TOOL_ITERATIONS = 5
 def _build_registry() -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(SearchKnowledgeBase())
+    registry.register(GetSubscription())
+    registry.register(GetPaymentStatus())
     return registry
 
 
