@@ -22,9 +22,19 @@
 
 **Feedback upserts by message.** The `Feedback` model has a unique constraint on `message_id`. Re-submitting feedback for the same assistant message updates the existing row rather than creating a duplicate. This is a domain constraint — one rating per response.
 
+**LLM failures are retried, then surfaced cleanly.** The adapter retries Gemini rate-limit (429) and transient upstream (5xx) responses with short exponential backoff — up to three retries from a 0.5s base. Non-retryable errors (an invalid key, a malformed request) fail immediately rather than waiting out the budget. When retries are exhausted the adapter raises `LLMUnavailable` and the boundary returns `503`, echoing the provider's suggested delay as a `Retry-After` header when one is present. Backoff is deliberately short: it absorbs a brief per-minute spike, but a sustained quota wall surfaces as a `503` for the caller to honor rather than blocking the request thread for 30-plus seconds.
+
+**The adapter tolerates partial responses.** Gemini can interleave text and function-call parts, return an empty candidate list, or return a candidate with no parts when a turn is safety-blocked or truncated (`MAX_TOKENS`). The adapter scans all parts — a function call takes precedence over any leading commentary text — joins multiple text parts, and raises `LLMEmptyResponse` (surfaced as `502`) when nothing usable comes back, rather than indexing into an empty list and failing as an opaque `500`. The adapter is the one place that touches the SDK's response shape, so this variation is absorbed here.
+
+## Testing
+
+**Each test runs in a rolled-back transaction.** Tests share the same Postgres instance as the app, so isolation is enforced per test rather than per database. The `get_db` dependency is overridden to bind the app's own sessions to a single connection whose outer transaction is rolled back on teardown; every session joins it through SQLAlchemy savepoints (`join_transaction_mode="create_savepoint"`), so the app's commits are visible to assertions during the test but discarded afterwards. Writes made through the API — including `retry_payment` creating a `PaymentRecord` — leave no residue; only the seed baseline persists across tests.
+
+**Live routing vs deterministic logic.** Routing tests call the real Gemini API to give honest signal on tool selection, so they can fail under free-tier quota. The spend gate, history windowing, feedback, and KB tests mock the LLM and cover the same logic deterministically without a key.
+
 ## Assumptions
 
-- The Gemini API key is on a free tier with limited RPM/RPD. Tests that hit the live API may fail under quota pressure; mock-based tests cover the same logic deterministically.
+- The Gemini API key is on a free tier with limited RPM/RPD. Live routing tests may fail under quota pressure; the deterministic tests cover the same logic. At runtime, quota exhaustion surfaces as a `503` (with `Retry-After`), not an opaque `500`.
 - Two seeded customers are sufficient for demonstrating all flows. The seed is idempotent — it checks for existing data before inserting.
 - FTS uses PostgreSQL's built-in `to_tsvector`/`plainto_tsquery` with the English dictionary. No external search service.
 - The mock backend (subscriptions, payments, passwords) returns hardcoded success/failure responses. Real integrations would replace these functions without changing the tool interface.
@@ -33,7 +43,7 @@
 
 - **No authentication layer.** `customer_id` comes from the request body, not from a JWT or session cookie. In production, a middleware would extract it from a verified token. The session-binding invariant (tools take `customer_id` from the session, not the model) is enforced regardless.
 - **No async.** Simpler to reason about, but each request blocks a thread during the Gemini call. Under load, this limits concurrency. An async rewrite would be the first scaling step.
-- **No rate limiting or retry on 429.** The app surfaces Gemini quota errors to the caller. A production system would queue requests or implement backoff.
+- **No request queue or per-customer rate limiting.** The adapter retries transient 429/5xx with backoff and surfaces persistent failures as `503`, but there is no server-side queue or per-customer quota. Under sustained free-tier limits, a production system would queue or shed load rather than return `503`.
 - **Single migration file.** All tables in one initial migration. A production project would have incremental migrations per schema change.
 
 ## Limitations

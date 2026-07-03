@@ -1,9 +1,17 @@
+import time
+
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
 
 from app.config import GEMINI_API_KEY, GEMINI_MODEL
+from app.exceptions import LLMEmptyResponse, LLMUnavailable
 
 _client = None
+
+# google-genai does not retry 429s, and the free tier's per-minute cap is easy to hit.
+_MAX_RETRIES = 3
+_BACKOFF_BASE_SECONDS = 0.5
 
 
 def _get_client():
@@ -55,6 +63,65 @@ def _build_tools(declarations: list[dict]) -> list[types.Tool] | None:
     ]
 
 
+def _suggested_retry_after(exc: genai_errors.APIError) -> float | None:
+    details = getattr(exc, "details", None)
+    if not isinstance(details, dict):
+        return None
+    for item in details.get("error", {}).get("details", []):
+        if str(item.get("@type", "")).endswith("RetryInfo"):
+            raw = item.get("retryDelay", "")
+            if isinstance(raw, str) and raw.endswith("s"):
+                try:
+                    return float(raw[:-1])
+                except ValueError:
+                    return None
+    return None
+
+
+def _generate_with_retry(contents, config):
+    client = _get_client()
+    delay = _BACKOFF_BASE_SECONDS
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            return client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=contents,
+                config=config,
+            )
+        except genai_errors.APIError as exc:
+            retryable = isinstance(exc, genai_errors.ServerError) or exc.code == 429
+            if not retryable or attempt == _MAX_RETRIES:
+                raise LLMUnavailable(_suggested_retry_after(exc)) from exc
+            time.sleep(delay)
+            delay *= 2
+
+
+def _parse_response(response) -> dict:
+    candidates = getattr(response, "candidates", None) or []
+    if not candidates:
+        raise LLMEmptyResponse("Gemini returned no candidates")
+
+    candidate = candidates[0]
+    parts = (candidate.content.parts if candidate.content else None) or []
+
+    # a tool call is the action, so it wins over any leading commentary text
+    for part in parts:
+        if part.function_call:
+            fc = part.function_call
+            return {
+                "type": "tool_call",
+                "tool_name": fc.name,
+                "arguments": dict(fc.args) if fc.args else {},
+            }
+
+    text = "".join(part.text for part in parts if part.text)
+    if not text:
+        raise LLMEmptyResponse(
+            f"Gemini returned no usable content (finish_reason={candidate.finish_reason})"
+        )
+    return {"type": "text", "content": text}
+
+
 def generate(messages: list[dict], tool_declarations: list[dict], system_prompt: str) -> dict:
     """Send messages to Gemini, return normalized {type, ...} response.
 
@@ -72,20 +139,5 @@ def generate(messages: list[dict], tool_declarations: list[dict], system_prompt:
     if tools:
         config.tools = tools
 
-    response = _get_client().models.generate_content(
-        model=GEMINI_MODEL,
-        contents=contents,
-        config=config,
-    )
-
-    part = response.candidates[0].content.parts[0]
-
-    if part.function_call:
-        fc = part.function_call
-        return {
-            "type": "tool_call",
-            "tool_name": fc.name,
-            "arguments": dict(fc.args) if fc.args else {},
-        }
-
-    return {"type": "text", "content": part.text}
+    response = _generate_with_retry(contents, config)
+    return _parse_response(response)

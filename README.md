@@ -46,6 +46,8 @@ GEMINI_API_KEY="your-key" \
 pytest tests/ -v
 ```
 
+Each test runs inside a transaction that is rolled back on teardown, so running the suite leaves no rows behind — including writes made through the API. The live routing tests call the real Gemini API and can fail when the key is over its free-tier quota; the deterministic tests do not need a key.
+
 ## API
 
 Interactive docs at `/docs` (Swagger UI) and `/openapi.json`.
@@ -83,6 +85,19 @@ Interactive docs at `/docs` (Swagger UI) and `/openapi.json`.
   "actions_taken": [{"tool": "get_subscription", "arguments": {}}]
 }
 ```
+
+### Error responses
+
+Failures are returned as `{"error": "..."}` from boundary handlers, not raw stack traces.
+
+| Status | When |
+|--------|------|
+| `404` | Conversation ID not found |
+| `422` | Agent hit the tool-iteration cap without producing a reply |
+| `502` | Model returned an unusable response (empty or safety-blocked) |
+| `503` | Model is rate-limited or unavailable — includes a `Retry-After` header when the provider supplies one. The adapter retries transient rate limits before surfacing this |
+
+The Gemini free tier has low per-minute and per-day request limits; a burst of chat requests can hit them and return `503` until the window resets.
 
 ## Architecture
 
