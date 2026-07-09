@@ -8,45 +8,134 @@ AI-powered customer support agent built with FastAPI, PostgreSQL, and Gemini. Ro
 
 - Docker and Docker Compose
 - A [Gemini API key](https://ai.google.dev/gemini-api/docs/api-key)
+- Python 3.12+ (only for local dev and running tests)
 
-### Run
+### Option A — Docker (everything containerized)
 
 ```bash
 git clone https://github.com/abhiraj75/SaaS_Agent.git
 cd SaaS_Agent
 
-# Set your API key
 echo "GEMINI_API_KEY=your-key-here" > .env
 
-# Start Postgres + app (runs migrations and seeds automatically)
 docker compose up -d
 ```
 
-The app runs on `http://localhost:8000`. The seed populates two customers, eight knowledge articles, subscriptions, and payment records.
+This starts Postgres and the app, runs migrations, and seeds data. The app is at `http://localhost:8000`.
+
+### Option B — Local dev (Postgres in Docker, app on host)
+
+```bash
+git clone https://github.com/abhiraj75/SaaS_Agent.git
+cd SaaS_Agent
+
+echo "GEMINI_API_KEY=your-key-here" > .env
+
+# Start Postgres only
+docker compose up -d db
+
+# Set up the Python environment
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Run migrations and seed
+export $(cat .env | xargs)
+export DATABASE_URL="postgresql://agent:agent@localhost:5432/support_agent"
+alembic upgrade head
+python -m app.seed
+
+# Start the server
+uvicorn app.main:app --reload --port 8000
+```
+
+### Seeded data
+
+The seed creates two customers, eight knowledge articles, subscriptions, and payment records.
+
+| Customer | ID | Plan | Notes |
+|----------|----|------|-------|
+| Alice Johnson | `a1000000-0000-0000-0000-000000000001` | Professional | Payments current |
+| Bob Smith | `a2000000-0000-0000-0000-000000000002` | Starter | Has a failed payment (`card_expired`) |
 
 ### Verify
 
 ```bash
-curl http://localhost:8000/health
-# {"status":"ok"}
+curl -s http://localhost:8000/health | python3 -m json.tool
+# {"status": "ok"}
+```
 
-curl -X POST http://localhost:8000/chat \
+Ask about the refund policy (routes to `search_knowledge_base`):
+
+```bash
+curl -s -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{"customer_id": "a1000000-0000-0000-0000-000000000001", "message": "What is your refund policy?"}'
+  -d '{"customer_id": "a1000000-0000-0000-0000-000000000001", "message": "What is your refund policy?"}' \
+  | python3 -m json.tool
+```
+
+Expected output (reply text varies, `actions_taken` is deterministic):
+
+```json
+{
+    "conversation_id": "...",
+    "reply": "We offer a full refund within 30 days of purchase for annual plans...",
+    "actions_taken": [
+        {"tool": "search_knowledge_base", "arguments": {"query": "refund policy"}}
+    ]
+}
+```
+
+Check subscription (routes to `get_subscription`):
+
+```bash
+curl -s -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"customer_id": "a1000000-0000-0000-0000-000000000001", "message": "What plan am I on?"}' \
+  | python3 -m json.tool
+```
+
+```json
+{
+    "conversation_id": "...",
+    "reply": "You are on the Professional plan...",
+    "actions_taken": [
+        {"tool": "get_subscription", "arguments": {}}
+    ]
+}
+```
+
+Multi-turn - pass back the `conversation_id` from a previous response to continue the conversation:
+
+```bash
+curl -s -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"customer_id": "a1000000-0000-0000-0000-000000000001", "message": "When does it renew?", "conversation_id": "<conversation_id from above>"}' \
+  | python3 -m json.tool
+```
+
+```json
+{
+    "conversation_id": "<same conversation_id>",
+    "reply": "Your Professional plan renews on ...",
+    "actions_taken": [
+        {"tool": "get_subscription", "arguments": {}}
+    ]
+}
 ```
 
 ### Run tests
 
-Tests require a running Postgres instance and a valid `GEMINI_API_KEY` for the live routing tests. Mock-based tests (spend gate, Phase 4, Phase 5) run without an API key.
+Tests need Postgres running (from either setup option above). Live routing tests call the real Gemini API and need a valid key; the deterministic tests (spend gate, context follow-up, feedback, KB CRUD) run without one.
 
 ```bash
-pip install -r requirements.txt
+source .venv/bin/activate
 DATABASE_URL="postgresql://agent:agent@localhost:5432/support_agent" \
 GEMINI_API_KEY="your-key" \
 pytest tests/ -v
 ```
 
-Each test runs inside a transaction that is rolled back on teardown, so running the suite leaves no rows behind — including writes made through the API. The live routing tests call the real Gemini API and can fail when the key is over its free-tier quota; the deterministic tests do not need a key.
+Each test runs inside a transaction that rolls back on teardown, so the suite leaves no residual rows. The live routing tests can fail under free-tier quota pressure; the deterministic tests cover the same logic without a key.
 
 ## API
 
