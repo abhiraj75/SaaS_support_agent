@@ -13,8 +13,8 @@ AI-powered customer support agent built with FastAPI, PostgreSQL, and Gemini. Ro
 ### Option A — Docker (everything containerized)
 
 ```bash
-git clone https://github.com/abhiraj75/SaaS_Agent.git
-cd SaaS_Agent
+git clone https://github.com/abhiraj75/SaaS_support_agent.git
+cd SaaS_support_agent
 
 echo "GEMINI_API_KEY=your-key-here" > .env
 
